@@ -1,0 +1,475 @@
+import os
+import tkinter as tk
+from tkinter import messagebox, scrolledtext
+import requests
+import dns.resolver
+import whois
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+import threading
+import time
+
+class OSINTToolGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("OSINT Tool")
+        self.root.configure(bg='#2d2d2d')
+        self.task_threads = []
+        self.stop_event = threading.Event()
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        main_frame = tk.Frame(self.root, bg='#2d2d2d')
+        main_frame.grid(row=0, column=0, pady=10, padx=10, sticky="nsew")
+
+        top_frame = tk.Frame(main_frame, bg='#3c3f41')
+        top_frame.grid(row=0, column=0, pady=10, padx=200, sticky="w")
+
+        button_frame = tk.Frame(main_frame, bg='#3c3f41')
+        button_frame.grid(row=1, column=0, pady=10, padx=200, sticky="w")
+
+        self.username_label = tk.Label(top_frame, text="Enter Username, IP, or Domain:", font=("Helvetica", 14),
+                                       bg='#3c3f41', fg="white")
+        self.username_label.grid(row=0, column=0, padx=5)
+
+        self.username_entry = tk.Entry(top_frame, font=("Helvetica", 14), width=40)
+        self.username_entry.grid(row=0, column=1, padx=5)
+
+        self.recon_button = self.create_hover_button(button_frame, text="User Reconnaissance", command=self.perform_recon)
+        self.recon_button.grid(row=0, column=0, padx=5, pady=5)
+
+        self.dns_button = self.create_hover_button(button_frame, text="DNS Lookup", command=self.perform_dns_lookup)
+        self.dns_button.grid(row=0, column=1, padx=5, pady=5)
+
+        self.whois_button = self.create_hover_button(button_frame, text="WHOIS Lookup", command=self.perform_whois_lookup)
+        self.whois_button.grid(row=0, column=2, padx=5, pady=5)
+
+        self.ip_button = self.create_hover_button(button_frame, text="IP Location Lookup", command=self.perform_ip_lookup)
+        self.ip_button.grid(row=1, column=0, padx=5, pady=5)
+
+        self.reverse_ip_button = self.create_hover_button(button_frame, text="Reverse IP Lookup",
+                                           command=self.perform_reverse_ip_lookup)
+        self.reverse_ip_button.grid(row=1, column=1, padx=5, pady=5)
+
+        self.subdomain_button = self.create_hover_button(button_frame, text="Subdomain Finding",
+                                          command=self.perform_subdomain_finding)
+        self.subdomain_button.grid(row=1, column=2, padx=5, pady=5)
+
+        self.clear_button = self.create_hover_button(button_frame, text="Clear", command=self.clear_results, bg="#d9534f", fg="black")
+        self.clear_button.grid(row=2, column=1, padx=5, pady=5)
+
+        self.result_text = scrolledtext.ScrolledText(main_frame, width=100, height=30, wrap=tk.WORD,
+                                                     font=("Helvetica", 15), bg='#282c34', fg='#61dafb')
+        self.result_text.grid(row=2, column=0, pady=10, padx=10, columnspan=3)
+
+        self.result_text.tag_configure("green", foreground="green")
+        self.result_text.tag_configure("red", foreground="red")
+        self.result_text.tag_configure("yellow", foreground="yellow")
+
+        self.stop_button = self.create_hover_button(main_frame, text="Stop", command=self.stop_tasks, bg="#d9534f", fg="black")
+        self.stop_button.grid(row=3, column=0, pady=10, padx=10)
+
+
+    def create_hover_button(self, parent, text, command, bg="#61dafb", fg="black"):
+        button = tk.Button(parent, text=text, command=command, font=("Helvetica", 14), bg=bg, fg=fg, width=20)
+        button.bind("<Enter>", lambda e: button.config(bg="green", fg="blue"))
+        button.bind("<Leave>", lambda e: button.config(bg=bg, fg=fg))
+        return button
+
+
+
+    def perform_ip_lookup(self):
+        ip_address = self.username_entry.get().strip()
+        if ip_address:
+            self.ip_location_lookup(ip_address)
+        else:
+            messagebox.showwarning("Error", "Please enter an IP address.")
+
+    def ip_location_lookup(self, ip_address):
+        try:
+            url = f"https://ipinfo.io/{ip_address}/json"
+            response = requests.get(url)
+            if response.status_code == 200:
+                ip_data = response.json()
+                self.result_text.insert(tk.END, f"\nIP Location Details for {ip_address}:\n")
+                self.result_text.insert(tk.END, f"IP: {ip_data['ip']}\n", "yellow")
+                self.result_text.insert(tk.END, f"City: {ip_data['city']}\n", "yellow")
+                self.result_text.insert(tk.END, f"Region: {ip_data['region']}\n", "yellow")
+                self.result_text.insert(tk.END, f"Country: {ip_data['country']}\n", "yellow")
+                self.result_text.insert(tk.END, f"Location: {ip_data['loc']}\n", "yellow")
+                self.result_text.insert(tk.END, f"Organization: {ip_data['org']}\n", "yellow")
+                self.result_text.insert(tk.END, f"Postal Code: {ip_data['postal']}\n", "yellow")
+            else:
+                self.result_text.insert(tk.END,
+                                        f"Failed to get IP location for {ip_address} with status code: {response.status_code}\n","red")
+        except requests.exceptions.ConnectionError as e:
+            self.result_text.insert(tk.END, f"Connection error for IP {ip_address}\nError: {str(e)}\n", "red")
+        except requests.exceptions.Timeout as e:
+            self.result_text.insert(tk.END, f"Timeout error for IP {ip_address}\nError: {str(e)}\n", "red")
+        except requests.exceptions.RequestException as e:
+            self.result_text.insert(tk.END, f"Error: {str(e)}\n", "red")
+
+    def perform_reverse_ip_lookup(self):
+        ip_address = self.username_entry.get().strip()
+        if ip_address:
+            self.reverse_ip_lookup(ip_address)
+        else:
+            messagebox.showwarning("Error", "Please enter an IP address.")
+
+    def reverse_ip_lookup(self, ip_address):
+        try:
+            resolver = dns.resolver.Resolver()
+            result = resolver.resolve_address(ip_address)
+            self.result_text.insert(tk.END, f"\nReverse IP Lookup Results for {ip_address}:\n")
+            for val in result:
+                self.result_text.insert(tk.END, f"Domain (PTR Record): {val}\n", "yellow")
+
+            # Additional information - A record lookup for the resolved domains (optional)
+            self.result_text.insert(tk.END, f"\nAdditional Information:\n")
+            for val in result:
+                domain = str(val)
+                a_records = resolver.resolve(domain, 'A')
+                if a_records:
+                    self.result_text.insert(tk.END, f"Domain: {domain}\n", "yellow")
+                    for a_record in a_records:
+                        self.result_text.insert(tk.END, f"IP Address (A Record): {a_record.to_text()}\n", "yellow")
+
+        except dns.resolver.NoAnswer:
+            self.result_text.insert(tk.END, f"No DNS records found for {ip_address}\n", "red")
+        except dns.resolver.NXDOMAIN:
+            self.result_text.insert(tk.END, f"IP address {ip_address} does not exist\n", "red")
+        except dns.resolver.Timeout:
+            self.result_text.insert(tk.END, f"DNS resolution timed out for {ip_address}\n", "red")
+        except Exception as e:
+            self.result_text.insert(tk.END, f"Error: {str(e)}\n", "red")
+
+    def perform_dns_lookup(self):
+        domain = self.username_entry.get().strip()
+        if domain:
+            self.dns_lookup(domain)
+        else:
+            messagebox.showwarning("Error", "Please enter a domain.")
+
+    def dns_lookup(self, domain):
+        try:
+            resolver = dns.resolver.Resolver()
+            result = resolver.resolve(domain, 'A')
+            self.result_text.insert(tk.END, f"\nDNS Lookup Results for {domain}:\n")
+            for ipval in result:
+                self.result_text.insert(tk.END, f"IP Address (A Record): {ipval.to_text()}\n", "yellow")
+
+            # MX Record Lookup
+            mx_result = resolver.resolve(domain, 'MX')
+            if mx_result:
+                self.result_text.insert(tk.END, f"\nMX Records for {domain}:\n")
+                for mx_record in mx_result:
+                    self.result_text.insert(tk.END, f"Mail Exchange Server: {mx_record.exchange.to_text()}\n", "yellow")
+
+            # TXT Record Lookup
+            txt_result = resolver.resolve(domain, 'TXT')
+            if txt_result:
+                self.result_text.insert(tk.END, f"\nTXT Records for {domain}:\n")
+                for txt_record in txt_result:
+                    self.result_text.insert(tk.END, f"TXT Record: {txt_record.to_text()}\n", "yellow")
+
+        except dns.resolver.NoAnswer:
+            self.result_text.insert(tk.END, f"No DNS records found for {domain}\n", "red")
+        except dns.resolver.NXDOMAIN:
+            self.result_text.insert(tk.END, f"Domain {domain} does not exist\n", "red")
+        except Exception as e:
+            self.result_text.insert(tk.END, f"Error: {str(e)}\n", "red")
+
+    def perform_whois_lookup(self):
+        domain = self.username_entry.get().strip()
+        if domain:
+            self.whois_lookup(domain)
+        else:
+            messagebox.showwarning("Error", "Please enter a domain.")
+
+    def whois_lookup(self, domain):
+        try:
+            whois_data = whois.whois(domain)
+            self.result_text.insert(tk.END, f"\nWHOIS Lookup Results for {domain}:\n")
+
+            # Check if WHOIS data is a list (multiple responses) or a single response
+            if isinstance(whois_data.domain_name, list):
+                for idx, domain_name in enumerate(whois_data.domain_name):
+                    self.insert_whois_data(f"Domain Name {idx + 1}: {domain_name}", "yellow")
+                    self.insert_whois_data(f"Registrar {idx + 1}: {whois_data.registrar[idx]}", "yellow")
+                    self.insert_whois_data(f"Creation Date {idx + 1}: {whois_data.creation_date[idx]}", "yellow")
+                    self.insert_whois_data(f"Expiration Date {idx + 1}: {whois_data.expiration_date[idx]}", "yellow")
+                    self.insert_whois_data(f"Name Servers {idx + 1}: {', '.join(whois_data.name_servers[idx])}",
+                                           "yellow")
+                    self.insert_whois_data("", "")  # Empty line for readability
+            else:
+                self.insert_whois_data(f"Domain Name: {whois_data.domain_name}", "yellow")
+                self.insert_whois_data(f"Registrar: {whois_data.registrar}", "yellow")
+                self.insert_whois_data(f"Creation Date: {whois_data.creation_date}", "yellow")
+                self.insert_whois_data(f"Expiration Date: {whois_data.expiration_date}", "yellow")
+                self.insert_whois_data(f"Name Servers: {', '.join(whois_data.name_servers)}", "yellow")
+        except whois.parser.PywhoisError as e:
+            self.insert_whois_data(f"Error: {str(e)}\n", "red")
+        except Exception as e:
+            self.insert_whois_data(f"Error: {str(e)}\n", "red")
+
+    def insert_whois_data(self, data, color):
+        self.result_text.insert(tk.END, data + "\n", color)
+
+    def perform_subdomain_finding(self):
+        # Code for subdomain finding here
+        domain = self.username_entry.get().strip()
+        if domain:
+            subdomain_thread = threading.Thread(target=self.subdomain_finding, args=(domain,))
+            self.task_threads.append(subdomain_thread)
+            subdomain_thread.start()
+        else:
+            messagebox.showwarning("Error", "Please enter a domain.")
+
+    def subdomain_finding(self, domain):
+        # Create the 'OSINT_DATA' folder if it doesn't exist
+        if not os.path.exists("OSINT_DATA"):
+            os.makedirs("OSINT_DATA")
+
+        try:
+            url = f"https://crt.sh/?q=%25.{domain}&output=json"
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                subdomains = set()
+                for entry in data:
+                    if self.stop_event.is_set():
+                        self.result_text.insert(tk.END, "Subdomain finding stopped.\n", "red")
+                        return
+                    name_value = entry.get('name_value')
+                    if name_value:
+                        subdomains.update(name_value.split('\n'))
+
+                self.result_text.insert(tk.END, f"\nSubdomains for {domain}:\n")
+
+                # Create a folder for saving screenshots based on the searched query
+                query_folder = domain.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                query_folder_path = os.path.join("OSINT_DATA", "subdomain_images", query_folder)
+                if not os.path.exists(query_folder_path):
+                    os.makedirs(query_folder_path)
+
+                # Configure Selenium WebDriver
+                options = Options()
+                options.add_argument('--headless')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+                # Check each subdomain, display status, and take screenshots of live subdomains
+                for subdomain in subdomains:
+                    if self.stop_event.is_set():
+                        driver.quit()
+                        self.result_text.insert(tk.END, "Subdomain finding stopped.\n", "red")
+                        return
+
+                    subdomain_url = f"http://{subdomain}"
+                    try:
+                        response = requests.head(subdomain_url, timeout=5)
+                        if response.status_code < 400:
+                            self.result_text.insert(tk.END, f"{subdomain} is live.\n", "yellow")
+                            driver.get(subdomain_url)
+                            if self.stop_event.is_set():
+                                driver.quit()
+                                self.result_text.insert(tk.END, "Subdomain finding stopped.\n", "red")
+                                return
+                            time.sleep(2)  # Wait for the page to load
+                            screenshot_path = os.path.join(query_folder_path, f"{subdomain}.png")
+                            driver.save_screenshot(screenshot_path)
+                            self.result_text.insert(tk.END, f"Screenshot saved for {subdomain}: {screenshot_path}\n",
+                                                    "green")
+                        else:
+                            self.result_text.insert(tk.END,
+                                                    f"{subdomain} is not live (status code: {response.status_code}).\n",
+                                                    "red")
+                    except requests.exceptions.RequestException as e:
+                        if "ERR_NAME_NOT_RESOLVED" in str(e):
+                            self.result_text.insert(tk.END, f"Error resolving {subdomain}: {str(e)}\n", "red")
+                        else:
+                            self.result_text.insert(tk.END, f"Error accessing {subdomain}: {str(e)}\n", "red")
+
+                driver.quit()
+            else:
+                self.result_text.insert(tk.END,
+                                        f"Failed to find subdomains for {domain} with status code: {response.status_code}\n",
+                                        "red")
+        except requests.exceptions.ConnectionError as e:
+            self.result_text.insert(tk.END, f"Connection error for domain {domain}\nError: {str(e)}\n", "red")
+        except requests.exceptions.Timeout as e:
+            self.result_text.insert(tk.END, f"Timeout error for domain {domain}\nError: {str(e)}\n", "red")
+        except requests.exceptions.RequestException as e:
+            self.result_text.insert(tk.END, f"Error: {str(e)}\n", "red")
+    def clear_results(self):
+        self.result_text.delete(1.0, tk.END)
+
+    def stop_tasks(self):
+        stop_thread = threading.Thread(target=self._stop_tasks)
+        stop_thread.start()
+
+    def _stop_tasks(self):
+        self.stop_event.set()
+        for thread in self.task_threads:
+            if thread.is_alive():
+                thread.join()
+        self.task_threads = []
+        self.stop_event.clear()
+        self.result_text.insert(tk.END, "All tasks stopped.\n", "blue")
+
+    def perform_recon(self):
+        username = self.username_entry.get().strip()
+        if username:
+            recon_thread = threading.Thread(target=user_recon, args=(username, self.result_text, self.stop_event))
+            self.task_threads.append(recon_thread)
+            recon_thread.start()
+        else:
+            messagebox.showwarning("Error", "Please enter a username.")
+
+
+def user_recon(username, text_box,stop_event):
+    urllist = [
+        "https://instagram.com/{}",
+        "https://twitter.com/{}",
+        "https://linkedin.com/in/{}",
+        "https://youtube.com/{}",
+        "https://vimeo.com/{}",
+        "https://github.com/{}",
+        "https://pinterest.com/{}",
+        "https://flickr.com/people/{}",
+        "https://vk.com/{}",
+        "https://about.me/{}",
+        "https://disqus.com/{}",
+        "https://bitbucket.org/{}",
+        "https://flipboard.com/@{}",
+        "https://medium.com/@{}",
+        "https://hackerone.com/{}",
+        "https://keybase.io/{}",
+        "https://buzzfeed.com/{}",
+        "https://slideshare.net/{}",
+        "https://mixcloud.com/{}",
+        "https://soundcloud.com/{}",
+        "https://badoo.com/en/{}",
+        "https://imgur.com/user/{}",
+        "https://open.spotify.com/user/{}",
+        "https://pastebin.com/u/{}",
+        "https://wattpad.com/user/{}",
+        "https://canva.com/{}",
+        "https://codecademy.com/{}",
+        "https://last.fm/user/{}",
+        "https://blip.fm/{}",
+        "https://dribbble.com/{}",
+        "https://en.gravatar.com/{}",
+        "https://creativemarket.com/{}",
+        "https://ello.co/{}",
+        "https://cash.me/{}",
+        "https://angel.co/{}",
+        "https://500px.com/{}",
+        "https://houzz.com/user/{}",
+        "https://tripadvisor.com/members/{}",
+        "https://kongregate.com/accounts/{}",
+        "https://{}.blogspot.com/",
+        "https://{}.tumblr.com/",
+        "https://{}.wordpress.com/",
+        "https://{}.slack.com/",
+        "https://{}.livejournal.com/",
+        "https://{}.newgrounds.com/",
+        "https://{}.hubpages.com",
+        "https://{}.contently.com",
+        "https://steamcommunity.com/id/{}",
+        "https://www.wikipedia.org/wiki/User:{}",
+        "https://www.freelancer.com/u/{}",
+        "https://www.dailymotion.com/{}",
+        "https://www.etsy.com/shop/{}",
+        "https://www.scribd.com/{}",
+        "https://www.patreon.com/{}",
+        "https://www.behance.net/{}",
+        "https://www.goodreads.com/{}",
+        "https://www.gumroad.com/{}",
+        "https://www.instructables.com/member/{}",
+        "https://www.codementor.io/{}",
+        "https://www.reverbnation.com/{}",
+        "https://www.designspiration.net/{}",
+        "https://www.bandcamp.com/{}",
+        "https://www.colourlovers.com/love/{}",
+        "https://www.ifttt.com/p/{}",
+        "https://www.trakt.tv/users/{}",
+        "https://www.okcupid.com/profile/{}",
+        "https://www.trip.skyscanner.com/user/{}",
+        "https://www.angel.co/{}",
+        "https://www.last.fm/user/{}",
+        "https://www.8tracks.com/{}",
+        "https://www.roblox.com/user.aspx?username={}",
+        "https://www.gearbubble.com/gbstore/{}",
+        "https://www.funnyordie.com/{}",
+        "https://www.kongregate.com/accounts/{}",
+    ]
+
+    screenshots_folder = "screenshots"
+    os.makedirs(screenshots_folder, exist_ok=True)  # Create the screenshots folder if it doesn't exist
+
+    for url in urllist:
+        if stop_event.is_set():
+            text_box.insert(tk.END, "User reconnaissance stopped.\n", "red")
+            break
+        send_req(url, username, text_box)
+
+
+def send_req(url, username, text_box):
+    try:
+        response = requests.get(url.format(username), timeout=15)  # Set timeout to 15 seconds
+        if response.status_code == 200:
+            text_box.insert(tk.END, f"Found: {url.format(username)}\n", "blue")
+            take_screenshot(url, username, text_box)  # Capture screenshot immediately if found
+        elif response.status_code == 404:
+            text_box.insert(tk.END, f"Not Found: {url.format(username)}\n", "red")
+        else:
+            text_box.insert(tk.END, f"Unexpected status code {response.status_code} for URL: {url.format(username)}\n",
+                            "red")
+    except requests.exceptions.ConnectionError as e:
+        text_box.insert(tk.END, f"Connection error for URL: {url.format(username)}\nError: {str(e)}\n", "red")
+    except requests.exceptions.Timeout as e:
+        text_box.insert(tk.END, f"Timeout error for URL: {url.format(username)}\nError: {str(e)}\n", "red")
+    except requests.exceptions.RequestException as e:
+        text_box.insert(tk.END, f"Error: {str(e)}\n", "red")
+
+
+def take_screenshot(url, username, text_box):
+    try:
+        options = Options()
+        options.headless = True  # Run the browser in headless mode
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.get(url.format(username))
+
+        # Add a delay to allow the page to fully load
+        time.sleep(3)  # Adjust the delay time as needed (e.g., 5 seconds)
+
+        # Create the 'OSINT_DATA' folder if it doesn't exist
+        os.makedirs("OSINT_DATA", exist_ok=True)
+
+        # Create a folder for user images if it doesn't exist
+        user_images_folder = os.path.join("OSINT_DATA", "user_images")
+        os.makedirs(user_images_folder, exist_ok=True)
+
+        # Create a folder related to the searched username if it doesn't exist
+        user_folder = os.path.join(user_images_folder, username)
+        os.makedirs(user_folder, exist_ok=True)
+
+        # Save the screenshot in the user folder
+        screenshot_name = f"{user_folder}/{username}_{driver.title}.png"
+        driver.save_screenshot(screenshot_name)
+        driver.quit()
+        text_box.insert(tk.END, f"Screenshot saved: {screenshot_name}\n", "green")
+    except Exception as e:
+        text_box.insert(tk.END, f"Error taking screenshot for {url.format(username)}: {e}\n", "red")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = OSINTToolGUI(root)
+    root.mainloop()
+
